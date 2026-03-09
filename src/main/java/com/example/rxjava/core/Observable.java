@@ -1,0 +1,288 @@
+package com.example.rxjava.core;
+
+import com.example.rxjava.disposable.CompositeDisposable;
+import com.example.rxjava.disposable.Disposable;
+import com.example.rxjava.disposable.EmptyDisposable;
+import com.example.rxjava.scheduler.Scheduler;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+
+public class Observable<T> {
+    private final Emitter<T> emitter;
+
+    private Observable(Emitter<T> emitter) {
+        this.emitter = emitter;
+    }
+
+    public static <T> Observable<T> create(Emitter<T> emitter) {
+        return new Observable<>(new Emitter<T>() {
+            @Override
+            public void emit(Observer<T> observer) {
+                try {
+                    // Оборачиваем observer в защитный слой, который предотвращает эмиссию после завершения
+                    SafeObserver<T> safeObserver = new SafeObserver<>(observer);
+                    emitter.emit(safeObserver);
+                } catch (Exception e) {
+                    observer.onError(e);
+                }
+            }
+        });
+    }
+
+    public Disposable subscribe(Observer<T> observer) {
+        emitter.emit(observer);
+        return new EmptyDisposable();
+    }
+
+    // Упрощенная подписка с лямбдами
+    public Disposable subscribe(Consumer<T> onNext, Consumer<Throwable> onError, Runnable onComplete) {
+        return subscribe(new Observer<T>() {
+            @Override
+            public void onNext(T item) {
+                try {
+                    onNext.accept(item);
+                } catch (Exception e) {
+                    // Исключение в подписчике не влияет на поток
+                    System.err.println("Exception in subscriber: " + e.getMessage());
+                }
+            }
+
+            @Override
+            public void onError(Throwable t) {
+                try {
+                    onError.accept(t);
+                } catch (Exception e) {
+                    System.err.println("Exception in error handler: " + e.getMessage());
+                }
+            }
+
+            @Override
+            public void onComplete() {
+                try {
+                    onComplete.run();
+                } catch (Exception e) {
+                    System.err.println("Exception in completion handler: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    // Оператор map
+    public <R> Observable<R> map(Function<T, R> function) {
+        return Observable.create(emitter -> {
+            subscribe(
+                    item -> {
+                        try {
+                            emitter.onNext(function.apply(item));
+                        } catch (Exception e) {
+                            emitter.onError(e);
+                        }
+                    },
+                    emitter::onError,
+                    emitter::onComplete
+            );
+        });
+    }
+
+    // Оператор filter
+    public Observable<T> filter(Predicate<T> predicate) {
+        return Observable.create(emitter -> {
+            subscribe(
+                    item -> {
+                        try {
+                            if (predicate.test(item)) {
+                                emitter.onNext(item);
+                            }
+                        } catch (Exception e) {
+                            emitter.onError(e);
+                        }
+                    },
+                    emitter::onError,
+                    emitter::onComplete
+            );
+        });
+    }
+
+    // Оператор flatMap
+    public <R> Observable<R> flatMap(Function<T, Observable<R>> function) {
+        return Observable.create(emitter -> {
+            CompositeDisposable disposables = new CompositeDisposable();
+            AtomicBoolean mainCompleted = new AtomicBoolean(false);
+            AtomicBoolean errorOccurred = new AtomicBoolean(false);
+            AtomicInteger activeInnerCount = new AtomicInteger(0);
+            Object lock = new Object();
+
+            Disposable mainDisposable = subscribe(
+                    item -> {
+                        if (errorOccurred.get()) return;
+
+                        try {
+                            Observable<R> result = function.apply(item);
+
+                            activeInnerCount.incrementAndGet();
+
+                            Disposable inner = result.subscribe(
+                                    value -> {
+                                        synchronized (lock) {
+                                            if (!errorOccurred.get()) {
+                                                emitter.onNext(value);
+                                            }
+                                        }
+                                    },
+                                    error -> {
+                                        synchronized (lock) {
+                                            if (errorOccurred.compareAndSet(false, true)) {
+                                                emitter.onError(error);
+                                                disposables.dispose();
+                                            }
+                                        }
+                                    },
+                                    () -> {
+                                        synchronized (lock) {
+                                            int remaining = activeInnerCount.decrementAndGet();
+
+                                            if (!errorOccurred.get() && mainCompleted.get() && remaining == 0) {
+                                                emitter.onComplete();
+                                            }
+                                        }
+                                    }
+                            );
+
+                            disposables.add(inner);
+
+                        } catch (Exception e) {
+                            synchronized (lock) {
+                                if (errorOccurred.compareAndSet(false, true)) {
+                                    emitter.onError(e);
+                                    disposables.dispose();
+                                }
+                            }
+                        }
+                    },
+                    error -> {
+                        synchronized (lock) {
+                            if (errorOccurred.compareAndSet(false, true)) {
+                                emitter.onError(error);
+                                disposables.dispose();
+                            }
+                        }
+                    },
+                    () -> {
+                        synchronized (lock) {
+                            mainCompleted.set(true);
+                            if (!errorOccurred.get() && activeInnerCount.get() == 0) {
+                                emitter.onComplete();
+                            }
+                        }
+                    }
+            );
+
+            disposables.add(mainDisposable);
+        });
+    }
+
+    // Управление потоками - subscribeOn
+    public Observable<T> subscribeOn(Scheduler scheduler) {
+        return Observable.create(emitter -> {
+            scheduler.execute(() -> {
+                subscribe(
+                        emitter::onNext,
+                        emitter::onError,
+                        emitter::onComplete
+                );
+            });
+        });
+    }
+
+    // Управление потоками - observeOn
+    public Observable<T> observeOn(Scheduler scheduler) {
+        return Observable.create(emitter -> {
+            List<T> buffer = new ArrayList<>();
+            Object lock = new Object();
+            AtomicBoolean completed = new AtomicBoolean(false);
+            AtomicReference<Throwable> error = new AtomicReference<>(null);
+
+            subscribe(
+                    item -> {
+                        synchronized (lock) {
+                            buffer.add(item);
+                        }
+                        scheduler.execute(() -> {
+                            List<T> toEmit = new ArrayList<>();
+                            synchronized (lock) {
+                                if (!buffer.isEmpty()) {
+                                    toEmit.addAll(buffer);
+                                    buffer.clear();
+                                }
+                            }
+                            for (T value : toEmit) {
+                                if (error.get() == null) {
+                                    emitter.onNext(value);
+                                }
+                            }
+                            if (completed.get() && buffer.isEmpty()) {
+                                emitter.onComplete();
+                            }
+                        });
+                    },
+                    err -> {
+                        error.set(err);
+                        scheduler.execute(() -> {
+                            emitter.onError(err);
+                        });
+                    },
+                    () -> {
+                        completed.set(true);
+                        scheduler.execute(() -> {
+                            synchronized (lock) {
+                                if (buffer.isEmpty()) {
+                                    emitter.onComplete();
+                                }
+                            }
+                        });
+                    }
+            );
+        });
+    }
+
+    @FunctionalInterface
+    public interface Emitter<T> {
+        void emit(Observer<T> observer);
+    }
+
+    // Внутренний класс для безопасной эмиссии
+    private static class SafeObserver<T> implements Observer<T> {
+        private final Observer<T> actual;
+        private final AtomicBoolean terminated = new AtomicBoolean(false);
+
+        SafeObserver(Observer<T> actual) {
+            this.actual = actual;
+        }
+
+        @Override
+        public void onNext(T item) {
+            if (!terminated.get()) {
+                actual.onNext(item);
+            }
+        }
+
+        @Override
+        public void onError(Throwable t) {
+            if (terminated.compareAndSet(false, true)) {
+                actual.onError(t);
+            }
+        }
+
+        @Override
+        public void onComplete() {
+            if (terminated.compareAndSet(false, true)) {
+                actual.onComplete();
+            }
+        }
+    }
+}
