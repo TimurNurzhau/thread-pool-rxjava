@@ -1,52 +1,30 @@
-Курсовая работа по многопоточному и асинхронному программированию на Java
-Общая информация
-Данный проект содержит две независимые части курсовой работы:
+THREAD POOL & RXJAVA IMPLEMENTATION
 
-Реализация собственного ThreadPool с балансировкой и политиками отказа
+ОПИСАНИЕ ПРОЕКТА
 
-Реализация упрощенной версии RxJava
+Курсовая работа по многопоточному и асинхронному программированию на Java.
+Проект состоит из двух независимых частей.
 
-Структура проекта
-Часть 1: Custom ThreadPool (папка threadpool)
-Реализация пула потоков с настраиваемыми параметрами:
+Часть 1. Custom ThreadPool
+Реализация собственного пула потоков с настраиваемыми параметрами:
+- corePoolSize, maxPoolSize, keepAliveTime
+- queueSize, minSpareThreads
+- Три политики отказа (Abort, CallerRuns, Discard)
+- Round Robin балансировка между очередями
+- Детальное логирование всех событий
 
-corePoolSize, maxPoolSize, keepAliveTime
+Часть 2. RxJava Lite
+Упрощенная версия RxJava с базовыми операторами:
+- Observable и Observer
+- Операторы map, filter, flatMap
+- Три типа планировщиков (IO, Computation, Single)
+- subscribeOn и observeOn
+- Управление подписками через Disposable
 
-queueSize, minSpareThreads
+БЫСТРЫЙ СТАРТ
 
-Три политики отказа (Abort, CallerRuns, Discard)
-
-Round Robin балансировка между очередями
-
-Детальное логирование всех событий
-
-Подробнее в файле README_THREADPOOL.md
-
-Часть 2: RxJava Lite (папка rxjava)
-Упрощенная реализация RxJava:
-
-Observable и Observer
-
-Операторы map, filter, flatMap
-
-Три типа планировщиков (IO, Computation, Single)
-
-subscribeOn и observeOn
-
-Управление подписками через Disposable
-
-Подробнее в файле README_RXJAVA.md
-
-Демонстрационные программы
-Для ThreadPool:
-com.example.demo.ThreadPoolDemo
-
-Для RxJava:
-com.example.demo.RxJavaDemo
-
-Запуск проекта
 Сборка проекта:
-mvn clean compile
+mvn clean package
 
 Запуск ThreadPool демо:
 mvn exec:java -Dexec.mainClass="com.example.demo.ThreadPoolDemo"
@@ -54,11 +32,31 @@ mvn exec:java -Dexec.mainClass="com.example.demo.ThreadPoolDemo"
 Запуск RxJava демо:
 mvn exec:java -Dexec.mainClass="com.example.demo.RxJavaDemo"
 
-Технологии
+СТРУКТУРА ПРОЕКТА
+
+src/main/java/com/example/
+demo/                 - Демонстрационные классы
+threadpool/           - Реализация ThreadPool
+rxjava/               - Реализация RxJava
+
+src/test/java/com/example/
+rxjava/               - Тесты RxJava
+threadpool/           - Тесты ThreadPool
+
+ТЕСТИРОВАНИЕ
+
+Всего тестов: 32
+RxJava тесты: 24
+ThreadPool тесты: 8
+Статус: все тесты успешно проходят
+
+ТЕХНОЛОГИИ
+
 Java 17
-
 Maven
-
 SLF4J для логирования
+JUnit 5 для тестирования
 
-JUnit 5 для тестов
+АВТОР
+
+Timur Nurzhau
