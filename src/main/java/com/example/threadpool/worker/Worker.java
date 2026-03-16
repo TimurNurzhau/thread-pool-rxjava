@@ -72,7 +72,7 @@ public class Worker extends Thread {
         }
     }
 
-    private void setActive(boolean active) {
+ /*   private void setActive(boolean active) {
         activeLock.lock();
         try {
             isActive.set(active);
@@ -81,6 +81,11 @@ public class Worker extends Thread {
         } finally {
             activeLock.unlock();
         }
+    }
+*/
+
+    private void setActive(boolean active) {
+        isActive.set(active);
     }
 
     private void handleIdleState() {
