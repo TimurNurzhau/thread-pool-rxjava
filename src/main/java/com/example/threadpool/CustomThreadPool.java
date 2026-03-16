@@ -83,7 +83,6 @@ public class CustomThreadPool implements CustomExecutor {
     private void addWorker(BlockingQueue<Runnable> queue) {
         workersLock.lock();
         try {
-
             // Проверяем, не завершен ли уже пул
             if (isShutdown || isShutdownNow) {
                 logger.warn("[Pool] Cannot add worker after shutdown");
@@ -97,10 +96,35 @@ public class CustomThreadPool implements CustomExecutor {
                     config.getTimeUnit()
             );
             workers.add(worker);
-          //  logger.debug("=== DEBUG: Adding worker {} to workers list, list size now {}",
-          //          worker.getName(), workers.size());
             threadFactory.newThread(worker).start();
             logger.info("[Pool] Added worker {} for queue {}", worker.getName(), queue.hashCode());
+        } finally {
+            workersLock.unlock();
+        }
+    }
+
+    private BlockingQueue<Runnable> tryCreateNewWorker(BlockingQueue<Runnable> currentQueue) {
+        workersLock.lock();
+        try {
+            // Проверяем ещё раз под блокировкой
+            if (workers.size() < config.getMaxPoolSize()) {
+                BlockingQueue<Runnable> newQueue = new LinkedBlockingQueue<>(config.getQueueSize());
+                queues.add(newQueue);
+                loadBalancer.addQueue(newQueue);
+
+                // addWorker сам берет workersLock, но мы уже под блокировкой!
+                // Поэтому временно отпустим и возьмём снова
+                workersLock.unlock();
+                try {
+                    addWorker(newQueue);
+                } finally {
+                    workersLock.lock();
+                }
+
+                logger.debug("[Pool] New worker and queue added due to load");
+                return newQueue;
+            }
+            return currentQueue;
         } finally {
             workersLock.unlock();
         }
@@ -145,25 +169,17 @@ public class CustomThreadPool implements CustomExecutor {
 
         BlockingQueue<Runnable> targetQueue = loadBalancer.getNextQueue();
 
-        if (workers.size() < config.getMaxPoolSize()) {
-            BlockingQueue<Runnable> newQueue = new LinkedBlockingQueue<>(config.getQueueSize());
-            queues.add(newQueue);
-            loadBalancer.addQueue(newQueue);
-            addWorker(newQueue);
-            logger.debug("[Pool] New worker and queue added due to load");
-            targetQueue = newQueue;
-        }
+        // Пытаемся создать новый воркер под блокировкой (без race condition)
+        targetQueue = tryCreateNewWorker(targetQueue);
 
         boolean offered = targetQueue.offer(command);
         if (offered) {
             logger.info("[Pool] Task accepted into queue {}. Queue size: {}",
                     targetQueue.hashCode(), targetQueue.size());
-           // logger.debug("=== DEBUG: Task added to queue, queue size now {} ===", targetQueue.size());
         } else {
             rejectedTaskCount.incrementAndGet();
             logger.warn("[Pool] Queue {} is full! Current size: {}, max: {}",
                     targetQueue.hashCode(), targetQueue.size(), config.getQueueSize());
-           // logger.debug("=== DEBUG: Queue full, task rejected ===");
             rejectPolicy.reject(command, this);
         }
     }
@@ -180,7 +196,7 @@ public class CustomThreadPool implements CustomExecutor {
         logger.info("[Pool] Shutdown initiated");
         isShutdown = true;
 
-        monitorExecutor.shutdownNow();
+        monitorExecutor.shutdown();
         try {
             monitorExecutor.awaitTermination(1, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
@@ -202,7 +218,7 @@ public class CustomThreadPool implements CustomExecutor {
         logger.info("[Pool] ShutdownNow initiated");
         isShutdownNow = true;
 
-        monitorExecutor.shutdownNow();
+        monitorExecutor.shutdown();
         try {
             monitorExecutor.awaitTermination(1, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
@@ -236,8 +252,6 @@ public class CustomThreadPool implements CustomExecutor {
         workersLock.lock();
         try {
             for (Worker worker : workers) {
-                // Убираем проверку isAlive(), так как isActive() уже подразумевает,
-                // что поток жив и выполняет задачу
                 if (worker.isActive()) {
                     count++;
                     logger.debug("Worker {} is ACTIVE (active={})",
