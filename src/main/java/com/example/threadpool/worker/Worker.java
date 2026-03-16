@@ -9,20 +9,22 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class Worker extends Thread {
     private static final Logger logger = LoggerFactory.getLogger(Worker.class);
-    private static final int MAX_IDLE_CHECKS = 3;
 
     private final BlockingQueue<Runnable> taskQueue;
     private final long keepAliveTime;
     private final TimeUnit timeUnit;
+    private final int maxIdleChecks;
     private final AtomicBoolean isRunning = new AtomicBoolean(true);
     private final AtomicBoolean isActive = new AtomicBoolean(false);
     private int idleCheckCount = 0;
 
     public Worker(BlockingQueue<Runnable> taskQueue, String namePrefix,
-                  long keepAliveTime, TimeUnit timeUnit) {
+                  long keepAliveTime, TimeUnit timeUnit,
+                  int maxIdleChecks) {
         this.taskQueue = taskQueue;
         this.keepAliveTime = keepAliveTime;
         this.timeUnit = timeUnit;
+        this.maxIdleChecks = maxIdleChecks;
         setName(namePrefix + "-worker-" + getId());
     }
 
@@ -78,13 +80,13 @@ public class Worker extends Thread {
 
     private void handleIdleState() {
         idleCheckCount++;
-        if (idleCheckCount >= MAX_IDLE_CHECKS) {
+        if (idleCheckCount >= maxIdleChecks) {
             logger.info("[Worker] {} idle timeout after {} checks, stopping",
-                    getName(), MAX_IDLE_CHECKS);
+                    getName(), maxIdleChecks);
             isRunning.set(false);
         } else {
             logger.debug("[Worker] {} idle check {}/{}, continuing...",
-                    getName(), idleCheckCount, MAX_IDLE_CHECKS);
+                    getName(), idleCheckCount, maxIdleChecks);
         }
     }
 

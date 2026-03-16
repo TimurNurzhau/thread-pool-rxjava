@@ -93,7 +93,8 @@ public class CustomThreadPool implements CustomExecutor {
                     queue,
                     "CustomPool",
                     config.getKeepAliveTime(),
-                    config.getTimeUnit()
+                    config.getTimeUnit(),
+                    config.getMaxIdleChecks() // НОВЫЙ ПАРАМЕТР
             );
             workers.add(worker);
             threadFactory.newThread(worker).start();

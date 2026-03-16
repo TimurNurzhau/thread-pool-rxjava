@@ -13,9 +13,10 @@ public class ThreadPoolConfig {
     private final TimeUnit timeUnit;
     private final int queueSize;
     private final int minSpareThreads;
+    private final int maxIdleChecks;
 
     /**
-     * Создает новую конфигурацию пула потоков.
+     * Создает новую конфигурацию пула потоков со значением maxIdleChecks по умолчанию (3).
      *
      * @param corePoolSize минимальное (базовое) количество потоков
      * @param maxPoolSize максимальное количество потоков
@@ -27,12 +28,31 @@ public class ThreadPoolConfig {
     public ThreadPoolConfig(int corePoolSize, int maxPoolSize,
                             long keepAliveTime, TimeUnit timeUnit,
                             int queueSize, int minSpareThreads) {
+        this(corePoolSize, maxPoolSize, keepAliveTime, timeUnit, queueSize, minSpareThreads, 3);
+    }
+
+    /**
+     * Создает новую конфигурацию пула потоков с указанным maxIdleChecks.
+     *
+     * @param corePoolSize минимальное (базовое) количество потоков
+     * @param maxPoolSize максимальное количество потоков
+     * @param keepAliveTime время, в течение которого поток может простаивать до завершения
+     * @param timeUnit единицы времени для keepAliveTime
+     * @param queueSize ограничение на количество задач в очереди
+     * @param minSpareThreads минимальное число резервных потоков
+     * @param maxIdleChecks количество последовательных таймаутов перед завершением потока
+     */
+    public ThreadPoolConfig(int corePoolSize, int maxPoolSize,
+                            long keepAliveTime, TimeUnit timeUnit,
+                            int queueSize, int minSpareThreads,
+                            int maxIdleChecks) {
         this.corePoolSize = corePoolSize;
         this.maxPoolSize = maxPoolSize;
         this.keepAliveTime = keepAliveTime;
         this.timeUnit = timeUnit;
         this.queueSize = queueSize;
         this.minSpareThreads = minSpareThreads;
+        this.maxIdleChecks = maxIdleChecks;
     }
 
     /**
@@ -65,11 +85,16 @@ public class ThreadPoolConfig {
      */
     public int getMinSpareThreads() { return minSpareThreads; }
 
+    /**
+     * @return количество последовательных таймаутов перед завершением потока
+     */
+    public int getMaxIdleChecks() { return maxIdleChecks; }
+
     @Override
     public String toString() {
         return String.format(
-                "ThreadPoolConfig{corePoolSize=%d, maxPoolSize=%d, keepAliveTime=%d %s, queueSize=%d, minSpareThreads=%d}",
-                corePoolSize, maxPoolSize, keepAliveTime, timeUnit, queueSize, minSpareThreads
+                "ThreadPoolConfig{corePoolSize=%d, maxPoolSize=%d, keepAliveTime=%d %s, queueSize=%d, minSpareThreads=%d, maxIdleChecks=%d}",
+                corePoolSize, maxPoolSize, keepAliveTime, timeUnit, queueSize, minSpareThreads, maxIdleChecks
         );
     }
 }
