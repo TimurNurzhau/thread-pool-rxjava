@@ -384,4 +384,7 @@ public class CustomThreadPool implements CustomExecutor {
     public int getWorkerQueueId(Worker worker) {
         return worker.getQueueId();
     }
+    public LoadBalancer getLoadBalancer() {
+        return loadBalancer;
+    }
 }

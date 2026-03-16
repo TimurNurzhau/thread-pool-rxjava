@@ -8,8 +8,9 @@ import com.example.threadpool.policy.DiscardPolicy;
 import com.example.threadpool.queue.RoundRobinBalancer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
+import com.example.threadpool.policy.RetryOncePolicy;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
 
 public class ThreadPoolDemo {
     private static final Logger logger = LoggerFactory.getLogger(ThreadPoolDemo.class);
@@ -138,6 +139,40 @@ public class ThreadPoolDemo {
 
         Thread.sleep(5000);
         balancedPool.shutdown();
+
+        // 6. Тест кастомной RetryOncePolicy
+        logger.info("\n=== Тест 6: RetryOncePolicy (кастомная) ===");
+        CustomThreadPool retryPool = new CustomThreadPool(
+                new ThreadPoolConfig(1, 1, 1, TimeUnit.SECONDS, 1, 1),
+                new RetryOncePolicy(),
+                new RoundRobinBalancer()
+        );
+
+        CountDownLatch blockLatch = new CountDownLatch(1);
+
+        // Первая задача блокирует поток
+        retryPool.execute(() -> {
+            try {
+                blockLatch.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+
+        Thread.sleep(200);
+
+        // Эти задачи будут ретрайнуты
+        for (int i = 0; i < 3; i++) {
+            int taskId = i;
+            retryPool.execute(() -> {
+                logger.info("Retry task {} executed", taskId);
+            });
+        }
+
+        Thread.sleep(500);
+        blockLatch.countDown();
+        Thread.sleep(1000);
+        retryPool.shutdown();
 
         logger.info("\n=== Все тесты завершены ===");
     }
