@@ -14,18 +14,20 @@ public class Worker extends Thread {
     private final long keepAliveTime;
     private final TimeUnit timeUnit;
     private final int maxIdleChecks;
+    private final int queueId;
     private final AtomicBoolean isRunning = new AtomicBoolean(true);
     private final AtomicBoolean isActive = new AtomicBoolean(false);
     private int idleCheckCount = 0;
 
     public Worker(BlockingQueue<Runnable> taskQueue, String namePrefix,
                   long keepAliveTime, TimeUnit timeUnit,
-                  int maxIdleChecks) {
+                  int maxIdleChecks, int queueId) {
         this.taskQueue = taskQueue;
         this.keepAliveTime = keepAliveTime;
         this.timeUnit = timeUnit;
         this.maxIdleChecks = maxIdleChecks;
-        setName(namePrefix + "-worker-" + getId());
+        this.queueId = queueId;
+        setName(namePrefix + "-worker-" + getId() + "-queue-" + queueId);
     }
 
     @Override
@@ -107,5 +109,9 @@ public class Worker extends Thread {
 
     public boolean isActive() {
         return isActive.get();
+    }
+
+    public int getQueueId() {
+        return queueId;
     }
 }

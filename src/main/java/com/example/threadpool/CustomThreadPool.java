@@ -70,7 +70,7 @@ public class CustomThreadPool implements CustomExecutor {
 
         // Создаем corePoolSize потоков при старте
         for (int i = 0; i < config.getCorePoolSize(); i++) {
-            addWorker(queues.get(i));
+            addWorker(queues.get(i), i);
         }
 
         logger.info("[Pool] CustomThreadPool initialized with config: {}, policy: {}, queues: {}",
@@ -80,7 +80,7 @@ public class CustomThreadPool implements CustomExecutor {
         startSpareThreadsMonitor();
     }
 
-    private void addWorker(BlockingQueue<Runnable> queue) {
+    private void addWorker(BlockingQueue<Runnable> queue, int queueId) {
         workersLock.lock();
         try {
             // Проверяем, не завершен ли уже пул
@@ -94,7 +94,8 @@ public class CustomThreadPool implements CustomExecutor {
                     "CustomPool",
                     config.getKeepAliveTime(),
                     config.getTimeUnit(),
-                    config.getMaxIdleChecks() // НОВЫЙ ПАРАМЕТР
+                    config.getMaxIdleChecks(),
+                    queueId
             );
             workers.add(worker);
             threadFactory.newThread(worker).start();
@@ -112,12 +113,13 @@ public class CustomThreadPool implements CustomExecutor {
                 BlockingQueue<Runnable> newQueue = new LinkedBlockingQueue<>(config.getQueueSize());
                 queues.add(newQueue);
                 loadBalancer.addQueue(newQueue);
+                int newQueueId = queues.size() - 1;
 
                 // addWorker сам берет workersLock, но мы уже под блокировкой!
                 // Поэтому временно отпустим и возьмём снова
                 workersLock.unlock();
                 try {
-                    addWorker(newQueue);
+                    addWorker(newQueue, newQueueId);
                 } finally {
                     workersLock.lock();
                 }
@@ -147,7 +149,8 @@ public class CustomThreadPool implements CustomExecutor {
                 BlockingQueue<Runnable> newQueue = new LinkedBlockingQueue<>(config.getQueueSize());
                 queues.add(newQueue);
                 loadBalancer.addQueue(newQueue);
-                addWorker(newQueue);
+                int newQueueId = queues.size() - 1;
+                addWorker(newQueue, newQueueId);
                 totalWorkers++;
                 freeWorkers++;
                 logger.info("[Monitor] Created spare thread. Free workers now: {}", freeWorkers);
@@ -373,5 +376,12 @@ public class CustomThreadPool implements CustomExecutor {
      */
     public void resetRejectedTaskCount() {
         rejectedTaskCount.set(0);
+    }
+
+    /**
+     * Возвращает ID очереди для указанного воркера.
+     */
+    public int getWorkerQueueId(Worker worker) {
+        return worker.getQueueId();
     }
 }

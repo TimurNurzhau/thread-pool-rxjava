@@ -26,13 +26,25 @@ public class CustomThreadFactory implements ThreadFactory {
 
     /**
      * Создает новый поток с задачей.
+     * Если переданный Runnable уже является потоком (например, Worker),
+     * то он используется напрямую с установкой имени.
+     * Иначе создается новый поток.
      *
      * @param r задача для выполнения
-     * @return новый поток с уникальным именем
+     * @return поток с уникальным именем
      */
     @Override
     public Thread newThread(Runnable r) {
-        Thread thread = new Thread(r, namePrefix + "-" + threadNumber.getAndIncrement());
+        Thread thread;
+
+        // Если это уже поток, используем его
+        if (r instanceof Thread) {
+            thread = (Thread) r;
+            thread.setName(namePrefix + "-" + threadNumber.getAndIncrement());
+        } else {
+            // Иначе создаем новый поток
+            thread = new Thread(r, namePrefix + "-" + threadNumber.getAndIncrement());
+        }
 
         logger.info("[ThreadFactory] Creating new thread: {}", thread.getName());
 
