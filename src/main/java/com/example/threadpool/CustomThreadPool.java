@@ -125,6 +125,10 @@ public class CustomThreadPool implements CustomExecutor {
 
     @Override
     public void execute(Runnable command) {
+        if (command == null) {
+            throw new NullPointerException("Task cannot be null");
+        }
+
         if (isShutdown || isShutdownNow) {
             logger.warn("[Pool] Rejected task - pool is shutting down");
             rejectedTaskCount.incrementAndGet();
