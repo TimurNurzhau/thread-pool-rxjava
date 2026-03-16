@@ -240,17 +240,17 @@ public class CustomThreadPool implements CustomExecutor {
                 // что поток жив и выполняет задачу
                 if (worker.isActive()) {
                     count++;
-                    logger.info("Worker {} is ACTIVE (active={})",
+                    logger.debug("Worker {} is ACTIVE (active={})",
                             worker.getName(), worker.isActive());
                 } else {
-                    logger.info("Worker {} is NOT active (active={}, alive={})",
+                    logger.debug("Worker {} is NOT active (active={}, alive={})",
                             worker.getName(), worker.isActive(), worker.isAlive());
                 }
             }
         } finally {
             workersLock.unlock();
         }
-        logger.info("Total active count: {}", count);
+        logger.debug("Total active count: {}", count);
         return count;
     }
 
