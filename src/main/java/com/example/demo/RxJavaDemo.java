@@ -58,7 +58,8 @@ public class RxJavaDemo {
                 emitter.onError(e);
             }
         });
-// 4. Тест subscribeOn и observeOn
+
+        // 4. Тест subscribeOn и observeOn
         logger.info("\n=== Тест 3: subscribeOn и observeOn ===");
 
         IOScheduler io = new IOScheduler();
@@ -85,6 +86,7 @@ public class RxJavaDemo {
         Thread.sleep(1000);
         io.shutdown();
         computation.shutdown();
+
         // Подписка в IO потоке
         ioScheduler.execute(() -> {
             numbers.subscribe(
