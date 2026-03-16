@@ -90,8 +90,8 @@ public class CustomThreadPool implements CustomExecutor {
                     config.getTimeUnit()
             );
             workers.add(worker);
-            logger.debug("=== DEBUG: Adding worker {} to workers list, list size now {}",
-                    worker.getName(), workers.size());
+          //  logger.debug("=== DEBUG: Adding worker {} to workers list, list size now {}",
+          //          worker.getName(), workers.size());
             threadFactory.newThread(worker).start();
             logger.info("[Pool] Added worker {} for queue {}", worker.getName(), queue.hashCode());
         } finally {
@@ -151,12 +151,12 @@ public class CustomThreadPool implements CustomExecutor {
         if (offered) {
             logger.info("[Pool] Task accepted into queue {}. Queue size: {}",
                     targetQueue.hashCode(), targetQueue.size());
-            logger.debug("=== DEBUG: Task added to queue, queue size now {} ===", targetQueue.size());
+           // logger.debug("=== DEBUG: Task added to queue, queue size now {} ===", targetQueue.size());
         } else {
             rejectedTaskCount.incrementAndGet();
             logger.warn("[Pool] Queue {} is full! Current size: {}, max: {}",
                     targetQueue.hashCode(), targetQueue.size(), config.getQueueSize());
-            logger.debug("=== DEBUG: Queue full, task rejected ===");
+           // logger.debug("=== DEBUG: Queue full, task rejected ===");
             rejectPolicy.reject(command, this);
         }
     }
