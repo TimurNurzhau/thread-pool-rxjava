@@ -105,32 +105,39 @@ public class CustomThreadPool implements CustomExecutor {
         }
     }
 
+    /**
+     * Пытается создать новый рабочий поток, если текущее количество потоков меньше максимального.
+     * Возвращает очередь, в которую следует поместить задачу (новую или текущую).
+     *
+     * @param currentQueue текущая выбранная очередь
+     * @return очередь для размещения задачи
+     */
     private BlockingQueue<Runnable> tryCreateNewWorker(BlockingQueue<Runnable> currentQueue) {
+        BlockingQueue<Runnable> newQueue = null;
+        int newQueueId = -1;
+
+        // Часть 1: проверяем и создаем очередь под блокировкой
         workersLock.lock();
         try {
-            // Проверяем ещё раз под блокировкой
             if (workers.size() < config.getMaxPoolSize()) {
-                BlockingQueue<Runnable> newQueue = new LinkedBlockingQueue<>(config.getQueueSize());
+                newQueue = new LinkedBlockingQueue<>(config.getQueueSize());
                 queues.add(newQueue);
                 loadBalancer.addQueue(newQueue);
-                int newQueueId = queues.size() - 1;
-
-                // addWorker сам берет workersLock, но мы уже под блокировкой!
-                // Поэтому временно отпустим и возьмём снова
-                workersLock.unlock();
-                try {
-                    addWorker(newQueue, newQueueId);
-                } finally {
-                    workersLock.lock();
-                }
-
-                logger.debug("[Pool] New worker and queue added due to load");
-                return newQueue;
+                newQueueId = queues.size() - 1;
+                logger.debug("[Pool] Created new queue, total queues: {}", queues.size());
             }
-            return currentQueue;
         } finally {
             workersLock.unlock();
         }
+
+        // Часть 2: если создали очередь, запускаем воркер без блокировки
+        if (newQueue != null) {
+            addWorker(newQueue, newQueueId);
+            logger.info("[Pool] Created new worker and queue due to load");
+            return newQueue;
+        }
+
+        return currentQueue;
     }
 
     private void startSpareThreadsMonitor() {
@@ -173,7 +180,7 @@ public class CustomThreadPool implements CustomExecutor {
 
         BlockingQueue<Runnable> targetQueue = loadBalancer.getNextQueue();
 
-        // Пытаемся создать новый воркер под блокировкой (без race condition)
+        // Пытаемся создать новый воркер, если нужно
         targetQueue = tryCreateNewWorker(targetQueue);
 
         boolean offered = targetQueue.offer(command);
@@ -190,6 +197,18 @@ public class CustomThreadPool implements CustomExecutor {
 
     @Override
     public <T> Future<T> submit(Callable<T> callable) {
+        if (callable == null) {
+            throw new NullPointerException("Callable cannot be null");
+        }
+
+        if (isShutdown || isShutdownNow) {
+            logger.warn("[Pool] Rejected submission - pool is shutting down");
+            rejectedTaskCount.incrementAndGet();
+            CompletableFuture<T> rejectedFuture = new CompletableFuture<>();
+            rejectedFuture.completeExceptionally(new RejectedExecutionException("Pool is shutting down"));
+            return rejectedFuture;
+        }
+
         FutureTask<T> futureTask = new FutureTask<>(callable);
         execute(futureTask);
         return futureTask;
@@ -202,9 +221,12 @@ public class CustomThreadPool implements CustomExecutor {
 
         monitorExecutor.shutdown();
         try {
-            monitorExecutor.awaitTermination(1, TimeUnit.SECONDS);
+            if (!monitorExecutor.awaitTermination(1, TimeUnit.SECONDS)) {
+                monitorExecutor.shutdownNow();
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            monitorExecutor.shutdownNow();
         }
 
         workersLock.lock();
@@ -224,9 +246,12 @@ public class CustomThreadPool implements CustomExecutor {
 
         monitorExecutor.shutdown();
         try {
-            monitorExecutor.awaitTermination(1, TimeUnit.SECONDS);
+            if (!monitorExecutor.awaitTermination(1, TimeUnit.SECONDS)) {
+                monitorExecutor.shutdownNow();
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            monitorExecutor.shutdownNow();
         }
 
         workersLock.lock();
@@ -384,6 +409,7 @@ public class CustomThreadPool implements CustomExecutor {
     public int getWorkerQueueId(Worker worker) {
         return worker.getQueueId();
     }
+
     public LoadBalancer getLoadBalancer() {
         return loadBalancer;
     }
