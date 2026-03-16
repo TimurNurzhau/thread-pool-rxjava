@@ -3,6 +3,8 @@ package com.example.rxjava.core;
 import com.example.rxjava.disposable.CompositeDisposable;
 import com.example.rxjava.disposable.Disposable;
 import com.example.rxjava.scheduler.Scheduler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -12,6 +14,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 public class Observable<T> {
+    private static final Logger logger = LoggerFactory.getLogger(Observable.class);
     private final Emitter<T> emitter;
 
     private Observable(Emitter<T> emitter) {
@@ -62,7 +65,7 @@ public class Observable<T> {
         };
     }
 
-    // Упрощенная подписка с лямбдами
+    // Упрощенная подписка с лямбдами (ИСПРАВЛЕНО)
     public Disposable subscribe(Consumer<T> onNext, Consumer<Throwable> onError, Runnable onComplete) {
         return subscribe(new Observer<T>() {
             @Override
@@ -70,8 +73,7 @@ public class Observable<T> {
                 try {
                     onNext.accept(item);
                 } catch (Exception e) {
-                    // Исключение в подписчике не влияет на поток
-                    System.err.println("Exception in subscriber: " + e.getMessage());
+                    logger.error("Exception in subscriber onNext: {}", e.getMessage(), e);
                 }
             }
 
@@ -80,7 +82,7 @@ public class Observable<T> {
                 try {
                     onError.accept(t);
                 } catch (Exception e) {
-                    System.err.println("Exception in error handler: " + e.getMessage());
+                    logger.error("Exception in subscriber onError: {}", e.getMessage(), e);
                 }
             }
 
@@ -89,7 +91,7 @@ public class Observable<T> {
                 try {
                     onComplete.run();
                 } catch (Exception e) {
-                    System.err.println("Exception in completion handler: " + e.getMessage());
+                    logger.error("Exception in subscriber onComplete: {}", e.getMessage(), e);
                 }
             }
         });
