@@ -249,22 +249,14 @@ public class CustomThreadPool implements CustomExecutor {
      */
     public int getActiveCount() {
         int count = 0;
-        workersLock.lock();
-        try {
-            for (Worker worker : workers) {
-                if (worker.isActive()) {
-                    count++;
-                    logger.debug("Worker {} is ACTIVE (active={})",
-                            worker.getName(), worker.isActive());
-                } else {
-                    logger.debug("Worker {} is NOT active (active={}, alive={})",
-                            worker.getName(), worker.isActive(), worker.isAlive());
-                }
+        for (Worker worker : workers) {
+            if (worker.isActive()) {
+                count++;
             }
-        } finally {
-            workersLock.unlock();
         }
-        logger.debug("Total active count: {}", count);
+        if (logger.isDebugEnabled()) {
+            logger.debug("Total active count: {}", count);
+        }
         return count;
     }
 
