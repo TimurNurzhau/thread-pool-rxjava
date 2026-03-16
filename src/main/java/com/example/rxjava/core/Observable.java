@@ -26,7 +26,6 @@ public class Observable<T> {
             @Override
             public void emit(Observer<T> observer) {
                 try {
-                    // Оборачиваем observer в защитный слой, который предотвращает эмиссию после завершения
                     SafeObserver<T> safeObserver = new SafeObserver<>(observer);
                     emitter.emit(safeObserver);
                 } catch (Exception e) {
@@ -65,7 +64,6 @@ public class Observable<T> {
         };
     }
 
-    // Упрощенная подписка с лямбдами (ИСПРАВЛЕНО)
     public Disposable subscribe(Consumer<T> onNext, Consumer<Throwable> onError, Runnable onComplete) {
         return subscribe(new Observer<T>() {
             @Override
@@ -97,7 +95,6 @@ public class Observable<T> {
         });
     }
 
-    // Оператор map
     public <R> Observable<R> map(Function<T, R> function) {
         return Observable.create(emitter -> {
             Disposable d = subscribe(
@@ -114,7 +111,6 @@ public class Observable<T> {
         });
     }
 
-    // Оператор filter
     public Observable<T> filter(Predicate<T> predicate) {
         return Observable.create(emitter -> {
             Disposable d = subscribe(
@@ -133,7 +129,6 @@ public class Observable<T> {
         });
     }
 
-    // Оператор flatMap
     public <R> Observable<R> flatMap(Function<T, Observable<R>> function) {
         return Observable.create(emitter -> {
             CompositeDisposable disposables = new CompositeDisposable();
@@ -211,7 +206,6 @@ public class Observable<T> {
         });
     }
 
-    // Управление потоками - subscribeOn
     public Observable<T> subscribeOn(Scheduler scheduler) {
         return Observable.create(emitter -> {
             scheduler.execute(() -> {
@@ -224,7 +218,6 @@ public class Observable<T> {
         });
     }
 
-    // Управление потоками - observeOn (ИСПРАВЛЕННАЯ ВЕРСИЯ)
     public Observable<T> observeOn(Scheduler scheduler) {
         return Observable.create(emitter -> {
             List<T> buffer = new ArrayList<>();
@@ -236,12 +229,10 @@ public class Observable<T> {
                     item -> {
                         boolean shouldSchedule = false;
                         synchronized (lock) {
-                            // Добавляем элемент в буфер только если поток еще не завершен и нет ошибки
                             if (!completed.get() && error.get() == null) {
                                 buffer.add(item);
                                 shouldSchedule = true;
                             }
-                            // Если completed=true, элемент просто игнорируется (не добавляется в буфер)
                         }
                         if (shouldSchedule) {
                             scheduler.execute(() -> {
@@ -253,7 +244,6 @@ public class Observable<T> {
                                     }
                                 }
                                 for (T value : toEmit) {
-                                    // Проверяем наличие ошибки перед каждым эмитом
                                     synchronized (lock) {
                                         if (error.get() != null) {
                                             break;
@@ -261,7 +251,6 @@ public class Observable<T> {
                                     }
                                     emitter.onNext(value);
                                 }
-                                // Проверяем, нужно ли завершить поток после отправки всех элементов
                                 synchronized (lock) {
                                     if (completed.get() && buffer.isEmpty() && error.get() == null) {
                                         emitter.onComplete();
@@ -273,7 +262,7 @@ public class Observable<T> {
                     err -> {
                         synchronized (lock) {
                             if (error.compareAndSet(null, err)) {
-                                buffer.clear(); // Очищаем буфер, так как будет ошибка
+                                buffer.clear();
                                 scheduler.execute(() -> emitter.onError(err));
                             }
                         }
@@ -281,11 +270,9 @@ public class Observable<T> {
                     () -> {
                         synchronized (lock) {
                             completed.set(true);
-                            // Если буфер пуст, сразу завершаем
                             if (buffer.isEmpty()) {
                                 scheduler.execute(emitter::onComplete);
                             }
-                            // Иначе onComplete вызовется после отправки последнего элемента
                         }
                     }
             );
@@ -297,7 +284,6 @@ public class Observable<T> {
         void emit(Observer<T> observer);
     }
 
-    // Внутренний класс для безопасной эмиссии
     private static class SafeObserver<T> implements Observer<T> {
         private final Observer<T> actual;
         private final AtomicBoolean disposed = new AtomicBoolean(false);
@@ -317,22 +303,37 @@ public class Observable<T> {
 
         @Override
         public void onNext(T item) {
-            if (!terminated.get() && !disposed.get()) {
+            if (terminated.get() || disposed.get()) {
+                return;
+            }
+            try {
                 actual.onNext(item);
+            } catch (Exception e) {
+                onError(e);
             }
         }
 
         @Override
         public void onError(Throwable t) {
-            if (terminated.compareAndSet(false, true) && !disposed.get()) {
+            if (!terminated.compareAndSet(false, true) || disposed.get()) {
+                return;
+            }
+            try {
                 actual.onError(t);
+            } catch (Exception e) {
+                logger.error("Exception in subscriber onError handler: {}", e.getMessage(), e);
             }
         }
 
         @Override
         public void onComplete() {
-            if (terminated.compareAndSet(false, true) && !disposed.get()) {
+            if (!terminated.compareAndSet(false, true) || disposed.get()) {
+                return;
+            }
+            try {
                 actual.onComplete();
+            } catch (Exception e) {
+                logger.error("Exception in subscriber onComplete handler: {}", e.getMessage(), e);
             }
         }
     }
