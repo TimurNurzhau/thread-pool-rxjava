@@ -181,6 +181,11 @@ public class CustomThreadPool implements CustomExecutor {
         isShutdown = true;
 
         monitorExecutor.shutdownNow();
+        try {
+            monitorExecutor.awaitTermination(1, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
 
         workersLock.lock();
         try {
@@ -198,6 +203,11 @@ public class CustomThreadPool implements CustomExecutor {
         isShutdownNow = true;
 
         monitorExecutor.shutdownNow();
+        try {
+            monitorExecutor.awaitTermination(1, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
 
         workersLock.lock();
         try {
