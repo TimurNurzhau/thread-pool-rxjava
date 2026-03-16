@@ -20,7 +20,6 @@ public class Worker extends Thread {
     private final TimeUnit timeUnit;
     private final AtomicBoolean isRunning = new AtomicBoolean(true);
     private final AtomicBoolean isActive = new AtomicBoolean(false);
-    private final ReentrantLock activeLock = new ReentrantLock();
     private int idleCheckCount = 0;
 
     public Worker(BlockingQueue<Runnable> taskQueue, String namePrefix,
@@ -75,17 +74,6 @@ public class Worker extends Thread {
         }
     }
 
- /*   private void setActive(boolean active) {
-        activeLock.lock();
-        try {
-            isActive.set(active);
-            // Добавляем барьер памяти
-            logger.debug("[Worker] {} set active={}", getName(), active);
-        } finally {
-            activeLock.unlock();
-        }
-    }
-*/
 
     private void setActive(boolean active) {
         isActive.set(active);
@@ -119,11 +107,7 @@ public class Worker extends Thread {
     }
 
     public boolean isActive() {
-        activeLock.lock();
-        try {
-            return isActive.get();
-        } finally {
-            activeLock.unlock();
-        }
+        return isActive.get(); // AtomicBoolean сам атомарный
+
     }
 }
