@@ -24,7 +24,7 @@ public class ThreadPoolTest {
 
     @BeforeEach
     void setUp() {
-        config = new ThreadPoolConfig(2, 4, 1, TimeUnit.SECONDS, 2, 1);
+        config = new ThreadPoolConfig(2, 4, 1, TimeUnit.SECONDS, 5, 1);
     }
 
     @Test
