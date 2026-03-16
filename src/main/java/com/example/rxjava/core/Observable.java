@@ -2,7 +2,6 @@ package com.example.rxjava.core;
 
 import com.example.rxjava.disposable.CompositeDisposable;
 import com.example.rxjava.disposable.Disposable;
-import com.example.rxjava.disposable.EmptyDisposable;
 import com.example.rxjava.scheduler.Scheduler;
 
 import java.util.ArrayList;
@@ -35,8 +34,32 @@ public class Observable<T> {
     }
 
     public Disposable subscribe(Observer<T> observer) {
-        emitter.emit(observer);
-        return new EmptyDisposable();
+        SafeObserver<T> safeObserver;
+        if (observer instanceof SafeObserver) {
+            safeObserver = (SafeObserver<T>) observer;
+        } else {
+            safeObserver = new SafeObserver<>(observer);
+        }
+
+        try {
+            emitter.emit(safeObserver);
+        } catch (Exception e) {
+            if (!safeObserver.isDisposed()) {
+                safeObserver.onError(e);
+            }
+        }
+
+        return new Disposable() {
+            @Override
+            public void dispose() {
+                safeObserver.dispose();
+            }
+
+            @Override
+            public boolean isDisposed() {
+                return safeObserver.isDisposed();
+            }
+        };
     }
 
     // Упрощенная подписка с лямбдами
@@ -75,7 +98,7 @@ public class Observable<T> {
     // Оператор map
     public <R> Observable<R> map(Function<T, R> function) {
         return Observable.create(emitter -> {
-            subscribe(
+            Disposable d = subscribe(
                     item -> {
                         try {
                             emitter.onNext(function.apply(item));
@@ -92,7 +115,7 @@ public class Observable<T> {
     // Оператор filter
     public Observable<T> filter(Predicate<T> predicate) {
         return Observable.create(emitter -> {
-            subscribe(
+            Disposable d = subscribe(
                     item -> {
                         try {
                             if (predicate.test(item)) {
@@ -190,7 +213,7 @@ public class Observable<T> {
     public Observable<T> subscribeOn(Scheduler scheduler) {
         return Observable.create(emitter -> {
             scheduler.execute(() -> {
-                subscribe(
+                Disposable d = subscribe(
                         emitter::onNext,
                         emitter::onError,
                         emitter::onComplete
@@ -207,7 +230,7 @@ public class Observable<T> {
             AtomicBoolean completed = new AtomicBoolean(false);
             AtomicReference<Throwable> error = new AtomicReference<>(null);
 
-            subscribe(
+            Disposable d = subscribe(
                     item -> {
                         synchronized (lock) {
                             buffer.add(item);
@@ -258,29 +281,38 @@ public class Observable<T> {
     // Внутренний класс для безопасной эмиссии
     private static class SafeObserver<T> implements Observer<T> {
         private final Observer<T> actual;
+        private final AtomicBoolean disposed = new AtomicBoolean(false);
         private final AtomicBoolean terminated = new AtomicBoolean(false);
 
         SafeObserver(Observer<T> actual) {
             this.actual = actual;
         }
 
+        public boolean isDisposed() {
+            return disposed.get();
+        }
+
+        public void dispose() {
+            disposed.set(true);
+        }
+
         @Override
         public void onNext(T item) {
-            if (!terminated.get()) {
+            if (!terminated.get() && !disposed.get()) {
                 actual.onNext(item);
             }
         }
 
         @Override
         public void onError(Throwable t) {
-            if (terminated.compareAndSet(false, true)) {
+            if (terminated.compareAndSet(false, true) && !disposed.get()) {
                 actual.onError(t);
             }
         }
 
         @Override
         public void onComplete() {
-            if (terminated.compareAndSet(false, true)) {
+            if (terminated.compareAndSet(false, true) && !disposed.get()) {
                 actual.onComplete();
             }
         }
