@@ -83,6 +83,13 @@ public class CustomThreadPool implements CustomExecutor {
     private void addWorker(BlockingQueue<Runnable> queue) {
         workersLock.lock();
         try {
+
+            // Проверяем, не завершен ли уже пул
+            if (isShutdown || isShutdownNow) {
+                logger.warn("[Pool] Cannot add worker after shutdown");
+                return;
+            }
+
             Worker worker = new Worker(
                     queue,
                     "CustomPool",
