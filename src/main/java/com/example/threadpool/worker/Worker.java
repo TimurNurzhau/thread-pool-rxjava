@@ -6,13 +6,9 @@ import org.slf4j.LoggerFactory;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.locks.ReentrantLock;
 
 public class Worker extends Thread {
     private static final Logger logger = LoggerFactory.getLogger(Worker.class);
-    // Количество последовательных таймаутов перед завершением потока.
-    // Значение 3 выбрано как компромисс между быстрым освобождением ресурсов
-    // и предотвращением premature termination при кратковременных паузах в нагрузке.
     private static final int MAX_IDLE_CHECKS = 3;
 
     private final BlockingQueue<Runnable> taskQueue;
@@ -34,7 +30,7 @@ public class Worker extends Thread {
     public void run() {
         logger.info("[Worker] {} started for queue {}", getName(), taskQueue.hashCode());
 
-        while (isRunning.get()) {
+        while (isRunning.get() && !Thread.currentThread().isInterrupted()) {
             try {
                 Runnable task = taskQueue.poll(keepAliveTime, timeUnit);
 
@@ -53,11 +49,7 @@ public class Worker extends Thread {
 
     private void executeTask(Runnable task) {
         idleCheckCount = 0;
-
-        // Устанавливаем флаг активности ДО выполнения задачи
         setActive(true);
-
-        // Небольшая задержка для обеспечения видимости флага
         Thread.yield();
 
         logger.info("[Worker] {} ACTIVE - executes task from queue {}", getName(), taskQueue.hashCode());
@@ -66,14 +58,19 @@ public class Worker extends Thread {
             task.run();
             logger.info("[Worker] {} completed task", getName());
         } catch (Exception e) {
-            logger.error("[Worker] {} task failed: {}", getName(), e.getMessage());
+            // Проверяем, не был ли это InterruptedException
+            if (e instanceof InterruptedException || e.getCause() instanceof InterruptedException) {
+                logger.warn("[Worker] {} was interrupted during task execution", getName());
+                Thread.currentThread().interrupt(); // Восстанавливаем флаг
+                isRunning.set(false); // НЕМЕДЛЕННО завершаем поток
+            } else {
+                logger.error("[Worker] {} task failed: {}", getName(), e.getMessage());
+            }
         } finally {
-            // Сбрасываем флаг активности ПОСЛЕ выполнения задачи
             setActive(false);
             logger.info("[Worker] {} INACTIVE - task finished", getName());
         }
     }
-
 
     private void setActive(boolean active) {
         isActive.set(active);
@@ -107,7 +104,6 @@ public class Worker extends Thread {
     }
 
     public boolean isActive() {
-        return isActive.get(); // AtomicBoolean сам атомарный
-
+        return isActive.get();
     }
 }
