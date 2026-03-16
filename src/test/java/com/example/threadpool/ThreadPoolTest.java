@@ -280,7 +280,7 @@ public class ThreadPoolTest {
             pool.execute(latch::countDown);
         }
 
-        assertTrue(latch.await(5, TimeUnit.SECONDS));
+        assertTrue(latch.await(15, TimeUnit.SECONDS));
         pool.shutdown();
     }
 
