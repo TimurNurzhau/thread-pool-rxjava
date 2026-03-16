@@ -222,7 +222,7 @@ public class Observable<T> {
         });
     }
 
-    // Управление потоками - observeOn
+    // Управление потоками - observeOn (ИСПРАВЛЕННАЯ ВЕРСИЯ)
     public Observable<T> observeOn(Scheduler scheduler) {
         return Observable.create(emitter -> {
             List<T> buffer = new ArrayList<>();
@@ -232,42 +232,59 @@ public class Observable<T> {
 
             Disposable d = subscribe(
                     item -> {
+                        boolean shouldSchedule = false;
                         synchronized (lock) {
-                            buffer.add(item);
-                        }
-                        scheduler.execute(() -> {
-                            List<T> toEmit = new ArrayList<>();
-                            synchronized (lock) {
-                                if (!buffer.isEmpty()) {
-                                    toEmit.addAll(buffer);
-                                    buffer.clear();
-                                }
+                            // Добавляем элемент в буфер только если поток еще не завершен и нет ошибки
+                            if (!completed.get() && error.get() == null) {
+                                buffer.add(item);
+                                shouldSchedule = true;
                             }
-                            for (T value : toEmit) {
-                                if (error.get() == null) {
+                            // Если completed=true, элемент просто игнорируется (не добавляется в буфер)
+                        }
+                        if (shouldSchedule) {
+                            scheduler.execute(() -> {
+                                List<T> toEmit = new ArrayList<>();
+                                synchronized (lock) {
+                                    if (!buffer.isEmpty()) {
+                                        toEmit.addAll(buffer);
+                                        buffer.clear();
+                                    }
+                                }
+                                for (T value : toEmit) {
+                                    // Проверяем наличие ошибки перед каждым эмитом
+                                    synchronized (lock) {
+                                        if (error.get() != null) {
+                                            break;
+                                        }
+                                    }
                                     emitter.onNext(value);
                                 }
-                            }
-                            if (completed.get() && buffer.isEmpty()) {
-                                emitter.onComplete();
-                            }
-                        });
+                                // Проверяем, нужно ли завершить поток после отправки всех элементов
+                                synchronized (lock) {
+                                    if (completed.get() && buffer.isEmpty() && error.get() == null) {
+                                        emitter.onComplete();
+                                    }
+                                }
+                            });
+                        }
                     },
                     err -> {
-                        error.set(err);
-                        scheduler.execute(() -> {
-                            emitter.onError(err);
-                        });
+                        synchronized (lock) {
+                            if (error.compareAndSet(null, err)) {
+                                buffer.clear(); // Очищаем буфер, так как будет ошибка
+                                scheduler.execute(() -> emitter.onError(err));
+                            }
+                        }
                     },
                     () -> {
-                        completed.set(true);
-                        scheduler.execute(() -> {
-                            synchronized (lock) {
-                                if (buffer.isEmpty()) {
-                                    emitter.onComplete();
-                                }
+                        synchronized (lock) {
+                            completed.set(true);
+                            // Если буфер пуст, сразу завершаем
+                            if (buffer.isEmpty()) {
+                                scheduler.execute(emitter::onComplete);
                             }
-                        });
+                            // Иначе onComplete вызовется после отправки последнего элемента
+                        }
                     }
             );
         });
