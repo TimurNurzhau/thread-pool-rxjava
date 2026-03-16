@@ -4,6 +4,7 @@ import com.example.threadpool.policy.AbortPolicy;
 import com.example.threadpool.policy.CallerRunsPolicy;
 import com.example.threadpool.policy.DiscardPolicy;
 import com.example.threadpool.queue.RoundRobinBalancer;
+import com.example.threadpool.worker.Worker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -12,11 +13,9 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class ThreadPoolTest {
     private static final Logger logger = LoggerFactory.getLogger(ThreadPoolTest.class);
@@ -107,11 +106,10 @@ public class ThreadPoolTest {
         CountDownLatch blockLatch = new CountDownLatch(1);
         CountDownLatch startLatch = new CountDownLatch(1);
         CountDownLatch taskStartedLatch = new CountDownLatch(1);
-        CountDownLatch completionLatch = new CountDownLatch(4); // Ждем все 4 задачи
+        CountDownLatch completionLatch = new CountDownLatch(4);
         String mainThreadName = Thread.currentThread().getName();
         AtomicInteger callerRunCount = new AtomicInteger(0);
 
-        // Первая задача - блокирующая
         pool.execute(() -> {
             logger.info("Task 1 started in {}", Thread.currentThread().getName());
             startLatch.countDown();
@@ -129,7 +127,6 @@ public class ThreadPoolTest {
         assertTrue(taskStartedLatch.await(2, TimeUnit.SECONDS));
         Thread.sleep(200);
 
-        // Вторая задача - пойдет в очередь
         pool.execute(() -> {
             logger.info("Task 2 executed in {}", Thread.currentThread().getName());
             completionLatch.countDown();
@@ -138,7 +135,6 @@ public class ThreadPoolTest {
         Thread.sleep(500);
         assertEquals(1, pool.getTotalQueueSize(), "Очередь должна содержать 1 задачу");
 
-        // Третья и четвертая задачи - должны выполниться в caller thread
         for (int i = 3; i <= 4; i++) {
             final int taskId = i;
             pool.execute(() -> {
@@ -151,10 +147,8 @@ public class ThreadPoolTest {
             });
         }
 
-        // Разблокируем первую задачу
         blockLatch.countDown();
 
-        // Ждем завершения всех задач с таймаутом (без busy-waiting)
         assertTrue(completionLatch.await(5, TimeUnit.SECONDS),
                 "Tasks did not complete within timeout");
 
@@ -173,10 +167,9 @@ public class ThreadPoolTest {
         CountDownLatch blockLatch = new CountDownLatch(1);
         CountDownLatch startLatch = new CountDownLatch(1);
         CountDownLatch secondTaskLatch = new CountDownLatch(1);
-        CountDownLatch completionLatch = new CountDownLatch(2); // Ждем только 2 задачи (первую и вторую)
+        CountDownLatch completionLatch = new CountDownLatch(2);
         AtomicInteger executedCount = new AtomicInteger(0);
 
-        // Первая задача - блокирующая
         pool.execute(() -> {
             executedCount.incrementAndGet();
             startLatch.countDown();
@@ -191,7 +184,6 @@ public class ThreadPoolTest {
         assertTrue(startLatch.await(2, TimeUnit.SECONDS));
         Thread.sleep(200);
 
-        // Вторая задача - пойдет в очередь
         pool.execute(() -> {
             executedCount.incrementAndGet();
             logger.info("Вторая задача выполнена");
@@ -201,23 +193,18 @@ public class ThreadPoolTest {
 
         Thread.sleep(200);
 
-        // Третья и четвертая задачи - должны быть отброшены (DiscardPolicy)
         for (int i = 0; i < 2; i++) {
             pool.execute(() -> {
                 executedCount.incrementAndGet();
-                logger.info("Задача которая НЕ должна выполниться");
+                logger.info("Задача которая НЕ должна выполняться");
             });
         }
 
         Thread.sleep(500);
 
-        // Разблокируем первую задачу
         blockLatch.countDown();
 
-        // Ждем выполнения второй задачи
         assertTrue(secondTaskLatch.await(2, TimeUnit.SECONDS));
-
-        // Ждем завершения первых двух задач
         assertTrue(completionLatch.await(3, TimeUnit.SECONDS));
 
         Thread.sleep(500);
@@ -273,14 +260,53 @@ public class ThreadPoolTest {
 
     @Test
     void testRoundRobinBalancing() throws InterruptedException {
-        CustomThreadPool pool = new CustomThreadPool(config, new AbortPolicy(), new RoundRobinBalancer());
-        CountDownLatch latch = new CountDownLatch(10);
+        // Конфиг с 3 core потоками (3 очереди)
+        ThreadPoolConfig rrConfig = new ThreadPoolConfig(3, 3, 1, TimeUnit.SECONDS, 5, 1);
+        CustomThreadPool pool = new CustomThreadPool(rrConfig, new AbortPolicy(), new RoundRobinBalancer());
 
-        for (int i = 0; i < 10; i++) {
-            pool.execute(latch::countDown);
+        // Массив для подсчёта задач по очередям
+        int[] queueCounts = new int[3];
+        CountDownLatch latch = new CountDownLatch(9);
+
+        for (int i = 0; i < 9; i++) {
+            final int taskId = i;
+            pool.execute(() -> {
+                // Получаем текущий поток и его queueId
+                Thread currentThread = Thread.currentThread();
+                if (currentThread instanceof Worker) {
+                    Worker worker = (Worker) currentThread;
+                    int queueId = worker.getQueueId();
+                    synchronized (queueCounts) {
+                        queueCounts[queueId]++;
+                    }
+                    logger.info("Task {} executed by {} (queue {})",
+                            taskId, currentThread.getName(), queueId);
+                } else {
+                    logger.warn("Current thread is not a Worker: {}", currentThread.getName());
+                }
+                latch.countDown();
+            });
         }
 
-        assertTrue(latch.await(15, TimeUnit.SECONDS));
+        assertTrue(latch.await(5, TimeUnit.SECONDS), "Tasks did not complete within timeout");
+
+        // Проверяем распределение
+        int totalTasks = 0;
+        for (int i = 0; i < queueCounts.length; i++) {
+            logger.info("Queue {} received {} tasks", i, queueCounts[i]);
+            totalTasks += queueCounts[i];
+            assertTrue(queueCounts[i] > 0, "Queue " + i + " was never used");
+        }
+
+        assertEquals(9, totalTasks, "Total tasks executed should be 9");
+
+        // При 9 задачах на 3 очереди, ожидаем примерно по 3 задачи в каждой
+        // Допускаем неравномерность из-за особенностей планировщика, но не более 2 отклонения
+        for (int i = 0; i < queueCounts.length; i++) {
+            assertTrue(queueCounts[i] >= 2 && queueCounts[i] <= 4,
+                    "Queue " + i + " has " + queueCounts[i] + " tasks, expected ~3");
+        }
+
         pool.shutdown();
     }
 
@@ -300,14 +326,13 @@ public class ThreadPoolTest {
         CountDownLatch blockLatch = new CountDownLatch(1);
         CountDownLatch workerActiveLatch = new CountDownLatch(1);
 
-        // Запускаем задачу
         pool.execute(() -> {
             logger.info("Task started in {}", Thread.currentThread().getName());
             startLatch.countDown();
             workerActiveLatch.countDown();
 
             try {
-                Thread.sleep(2000); // Держим поток активным
+                Thread.sleep(2000);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
@@ -319,16 +344,11 @@ public class ThreadPoolTest {
             }
         });
 
-        // Ждем старта задачи
         assertTrue(startLatch.await(2, TimeUnit.SECONDS), "Task did not start");
-
-        // Ждем подтверждения активности
         assertTrue(workerActiveLatch.await(2, TimeUnit.SECONDS), "Worker did not become active");
 
-        // Принудительно ждем, чтобы флаг успел установиться
         Thread.sleep(500);
 
-        // Проверяем активность несколько раз
         int activeCount = 0;
         for (int i = 0; i < 5; i++) {
             activeCount = pool.getActiveCount();
