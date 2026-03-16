@@ -10,6 +10,9 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class Worker extends Thread {
     private static final Logger logger = LoggerFactory.getLogger(Worker.class);
+    // Количество последовательных таймаутов перед завершением потока.
+    // Значение 3 выбрано как компромисс между быстрым освобождением ресурсов
+    // и предотвращением premature termination при кратковременных паузах в нагрузке.
     private static final int MAX_IDLE_CHECKS = 3;
 
     private final BlockingQueue<Runnable> taskQueue;
