@@ -8,6 +8,8 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -15,6 +17,11 @@ import java.util.function.Consumer;
 
 public class Observable<T> {
     private static final Logger logger = LoggerFactory.getLogger(Observable.class);
+
+    // Пул для переиспользования списков в observeOn
+    private static final int MAX_LIST_POOL_SIZE = 16;
+    private static final Queue<List> LIST_POOL = new ConcurrentLinkedQueue<>();
+
     private final Emitter<T> emitter;
 
     private Observable(Emitter<T> emitter) {
@@ -22,6 +29,9 @@ public class Observable<T> {
     }
 
     public static <T> Observable<T> create(Emitter<T> emitter) {
+        if (emitter == null) {
+            throw new NullPointerException("emitter must not be null");
+        }
         return new Observable<>(new Emitter<T>() {
             @Override
             public void emit(Observer<T> observer) {
@@ -36,6 +46,10 @@ public class Observable<T> {
     }
 
     public Disposable subscribe(Observer<T> observer) {
+        if (observer == null) {
+            throw new NullPointerException("observer must not be null");
+        }
+
         SafeObserver<T> safeObserver;
         if (observer instanceof SafeObserver) {
             safeObserver = (SafeObserver<T>) observer;
@@ -65,13 +79,19 @@ public class Observable<T> {
     }
 
     public Disposable subscribe(Consumer<T> onNext, Consumer<Throwable> onError, Runnable onComplete) {
+        if (onNext == null || onError == null || onComplete == null) {
+            throw new NullPointerException("Subscriber callbacks must not be null");
+        }
+
         return subscribe(new Observer<T>() {
             @Override
             public void onNext(T item) {
                 try {
                     onNext.accept(item);
                 } catch (Exception e) {
-                    logger.error("Exception in subscriber onNext: {}", e.getMessage(), e);
+                    // Ошибка в подписчике не должна влиять на поток
+                    logger.error("Subscriber threw exception in onNext lambda: {}", e.getMessage(), e);
+                    // НЕ вызываем onError!
                 }
             }
 
@@ -80,7 +100,7 @@ public class Observable<T> {
                 try {
                     onError.accept(t);
                 } catch (Exception e) {
-                    logger.error("Exception in subscriber onError: {}", e.getMessage(), e);
+                    logger.error("Exception in subscriber onError handler: {}", e.getMessage(), e);
                 }
             }
 
@@ -89,13 +109,17 @@ public class Observable<T> {
                 try {
                     onComplete.run();
                 } catch (Exception e) {
-                    logger.error("Exception in subscriber onComplete: {}", e.getMessage(), e);
+                    logger.error("Exception in subscriber onComplete handler: {}", e.getMessage(), e);
                 }
             }
         });
     }
 
     public <R> Observable<R> map(Function<T, R> function) {
+        if (function == null) {
+            throw new NullPointerException("function must not be null");
+        }
+
         return Observable.create(emitter -> {
             Disposable d = subscribe(
                     item -> {
@@ -112,6 +136,10 @@ public class Observable<T> {
     }
 
     public Observable<T> filter(Predicate<T> predicate) {
+        if (predicate == null) {
+            throw new NullPointerException("predicate must not be null");
+        }
+
         return Observable.create(emitter -> {
             Disposable d = subscribe(
                     item -> {
@@ -130,6 +158,10 @@ public class Observable<T> {
     }
 
     public <R> Observable<R> flatMap(Function<T, Observable<R>> function) {
+        if (function == null) {
+            throw new NullPointerException("function must not be null");
+        }
+
         return Observable.create(emitter -> {
             CompositeDisposable disposables = new CompositeDisposable();
             AtomicBoolean mainCompleted = new AtomicBoolean(false);
@@ -148,10 +180,9 @@ public class Observable<T> {
 
                             Disposable inner = result.subscribe(
                                     value -> {
-                                        synchronized (lock) {
-                                            if (!errorOccurred.get()) {
-                                                emitter.onNext(value);
-                                            }
+                                        // SafeObserver внутри уже потокобезопасен
+                                        if (!errorOccurred.get()) {
+                                            emitter.onNext(value);
                                         }
                                     },
                                     error -> {
@@ -163,12 +194,9 @@ public class Observable<T> {
                                         }
                                     },
                                     () -> {
-                                        synchronized (lock) {
-                                            int remaining = activeInnerCount.decrementAndGet();
-
-                                            if (!errorOccurred.get() && mainCompleted.get() && remaining == 0) {
-                                                emitter.onComplete();
-                                            }
+                                        int remaining = activeInnerCount.decrementAndGet();
+                                        if (!errorOccurred.get() && mainCompleted.get() && remaining == 0) {
+                                            emitter.onComplete();
                                         }
                                     }
                             );
@@ -193,11 +221,9 @@ public class Observable<T> {
                         }
                     },
                     () -> {
-                        synchronized (lock) {
-                            mainCompleted.set(true);
-                            if (!errorOccurred.get() && activeInnerCount.get() == 0) {
-                                emitter.onComplete();
-                            }
+                        mainCompleted.set(true);
+                        if (!errorOccurred.get() && activeInnerCount.get() == 0) {
+                            emitter.onComplete();
                         }
                     }
             );
@@ -207,6 +233,10 @@ public class Observable<T> {
     }
 
     public Observable<T> subscribeOn(Scheduler scheduler) {
+        if (scheduler == null) {
+            throw new NullPointerException("scheduler must not be null");
+        }
+
         return Observable.create(emitter -> {
             scheduler.execute(() -> {
                 Disposable d = subscribe(
@@ -219,6 +249,10 @@ public class Observable<T> {
     }
 
     public Observable<T> observeOn(Scheduler scheduler) {
+        if (scheduler == null) {
+            throw new NullPointerException("scheduler must not be null");
+        }
+
         return Observable.create(emitter -> {
             List<T> buffer = new ArrayList<>();
             Object lock = new Object();
@@ -236,24 +270,38 @@ public class Observable<T> {
                         }
                         if (shouldSchedule) {
                             scheduler.execute(() -> {
-                                List<T> toEmit = new ArrayList<>();
+                                // Получаем список из пула или создаем новый
+                                List<T> toEmit = LIST_POOL.poll();
+                                if (toEmit == null) {
+                                    toEmit = new ArrayList<>();
+                                }
+
                                 synchronized (lock) {
                                     if (!buffer.isEmpty()) {
                                         toEmit.addAll(buffer);
                                         buffer.clear();
                                     }
                                 }
-                                for (T value : toEmit) {
-                                    synchronized (lock) {
+
+                                try {
+                                    for (T value : toEmit) {
+                                        // Проверяем ошибку перед каждой эмиссией
                                         if (error.get() != null) {
                                             break;
                                         }
+                                        emitter.onNext(value);
                                     }
-                                    emitter.onNext(value);
-                                }
-                                synchronized (lock) {
-                                    if (completed.get() && buffer.isEmpty() && error.get() == null) {
-                                        emitter.onComplete();
+
+                                    synchronized (lock) {
+                                        if (completed.get() && buffer.isEmpty() && error.get() == null) {
+                                            emitter.onComplete();
+                                        }
+                                    }
+                                } finally {
+                                    // Возвращаем список в пул, если там не слишком много
+                                    if (LIST_POOL.size() < MAX_LIST_POOL_SIZE) {
+                                        toEmit.clear();
+                                        LIST_POOL.offer(toEmit);
                                     }
                                 }
                             });
@@ -309,7 +357,8 @@ public class Observable<T> {
             try {
                 actual.onNext(item);
             } catch (Exception e) {
-                onError(e);
+                logger.error("Subscriber threw exception in onNext: {}", e.getMessage(), e);
+                // НЕ вызываем onError!
             }
         }
 
