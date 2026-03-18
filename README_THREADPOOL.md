@@ -131,11 +131,10 @@ Race condition в execute | Превышение maxPoolSize | Добавлен 
 
 ```mermaid
 xychart-beta
-    title "Сравнение производительности: ThreadPoolExecutor vs CustomThreadPool"
-    x-axis ["Среднее время (мс)", "Пропускная способность (тыс/сек)", "95-й перцентиль (мс)"]
-    y-axis "Значение" 0 --> 35
-    bar [320, 31250, 45]
-    bar [410, 24390, 68]
+    title "Сравнение пропускной способности (задач/сек)"
+    x-axis ["ThreadPoolExecutor", "CustomThreadPool"]
+    y-axis "Задач в секунду" 0 --> 35000
+    bar [31250, 24390]
 ```
 
 *ThreadPoolExecutor показывает лучшие результаты благодаря низкоуровневым оптимизациям.*
